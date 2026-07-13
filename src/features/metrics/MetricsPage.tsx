@@ -8,8 +8,6 @@ import { ChartContainer } from "../../components/ui/Chart";
 
 type ChartConfig = { id: string; metric: string; hours: number };
 type TimeBounds = { from: number; to: number };
-const chartStorageKey = "computer-state.metric-charts.v1";
-const defaultMetricIds = ["cpu.total.usage", "memory.usage", "network.bytes_received", "storage.usage"];
 const ranges = [
   { label: "15 minutes", hours: 0.25, intervalSeconds: 15 },
   { label: "1 hour", hours: 1, intervalSeconds: 60 },
@@ -18,58 +16,18 @@ const ranges = [
   { label: "7 days", hours: 168, intervalSeconds: 3600 },
 ];
 
-function createChart(metric: string, hours = 6): ChartConfig {
-  return { id: crypto.randomUUID(), metric, hours };
-}
-
-export function createDefaultCharts(): ChartConfig[] {
-  return defaultMetricIds.map((metric) => createChart(metric));
-}
-
-export function parseStoredCharts(value: string | null): ChartConfig[] | undefined {
-  if (!value) return undefined;
-  try {
-    const charts: unknown = JSON.parse(value);
-    if (!Array.isArray(charts) || charts.length === 0) return undefined;
-    const validRanges = new Set(ranges.map((range) => range.hours));
-    if (!charts.every((chart) => chart && typeof chart.id === "string" && typeof chart.metric === "string" && typeof chart.hours === "number" && validRanges.has(chart.hours))) return undefined;
-    return charts as ChartConfig[];
-  } catch {
-    return undefined;
-  }
-}
-
-function loadCharts(): ChartConfig[] {
-  try {
-    return parseStoredCharts(localStorage.getItem(chartStorageKey)) ?? createDefaultCharts();
-  } catch {
-    return createDefaultCharts();
-  }
-}
-
 export function MetricsPage() {
   const [catalog, setCatalog] = useState<MetricDescriptor[]>([]);
-  const [charts, setCharts] = useState<ChartConfig[]>(loadCharts);
+  const [charts, setCharts] = useState<ChartConfig[]>([{ id: crypto.randomUUID(), metric: "cpu.total.usage", hours: 6 }]);
 
   useEffect(() => { api.catalog().then(setCatalog); }, []);
-  useEffect(() => {
-    try { localStorage.setItem(chartStorageKey, JSON.stringify(charts)); } catch { /* Storage is optional; charts still work for this session. */ }
-  }, [charts]);
   const available = catalog.filter((metric) => metric.available);
-
-  function addChart() {
-    setCharts((items) => {
-      const unused = available.find((metric) => !items.some((chart) => chart.metric === metric.id));
-      const metric = unused?.id ?? available[items.length % available.length]?.id ?? "cpu.total.usage";
-      return [...items, createChart(metric)];
-    });
-  }
 
   return (
     <section>
       <div className="page-heading">
         <div><p className="eyebrow">Live history</p><h1>System metrics</h1><p>Explore the metrics stored locally on this computer.</p></div>
-        <Button onClick={addChart}><Plus size={15} /> Add chart</Button>
+        <Button onClick={() => setCharts((items) => [...items, { id: crypto.randomUUID(), metric: available[0]?.id ?? "cpu.total.usage", hours: 6 }])}><Plus size={15} /> Add chart</Button>
       </div>
       <div className="chart-grid">
         {charts.map((chart) => (

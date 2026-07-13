@@ -107,6 +107,7 @@ async fn get_latest_metrics(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct HistoryQuery {
     metrics: Vec<String>,
     from: String,
@@ -202,6 +203,8 @@ async fn get_service_status(
 
 fn open_route(app: &tauri::AppHandle, route: &str) {
     if let Some(window) = app.get_webview_window("main") {
+        #[cfg(target_os = "macos")]
+        let _ = app.set_dock_visibility(true);
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -223,9 +226,6 @@ pub fn run() {
             open_route(app, "/metrics");
         }))
         .setup(|app| {
-            #[cfg(target_os = "macos")]
-            app.handle().set_dock_visibility(false)?;
-
             let started_in_background = std::env::args().any(|argument| argument == "--background");
             let app_data = app.path().app_data_dir()?;
             std::fs::create_dir_all(&app_data)?;
@@ -313,6 +313,8 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     window.hide()?;
                 }
+                #[cfg(target_os = "macos")]
+                app.handle().set_dock_visibility(false)?;
             }
             Ok(())
         })
@@ -320,6 +322,8 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                #[cfg(target_os = "macos")]
+                let _ = window.app_handle().set_dock_visibility(false);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -341,4 +345,23 @@ pub fn run() {
             tauri::async_runtime::block_on(state.shutdown_http());
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_query_accepts_frontend_interval_name() {
+        let query: HistoryQuery = serde_json::from_value(serde_json::json!({
+            "metrics": ["cpu.total.usage"],
+            "from": "2026-07-13T12:00:00Z",
+            "to": "2026-07-13T13:00:00Z",
+            "aggregation": "avg",
+            "intervalSeconds": 60
+        }))
+        .unwrap();
+
+        assert_eq!(query.interval_seconds, Some(60));
+    }
 }
