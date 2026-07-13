@@ -12,6 +12,44 @@ use settings::AppSettings;
 use state::AppState;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
+
+struct StartupMenuItem(tauri::menu::CheckMenuItem<tauri::Wry>);
+
+fn startup_enabled(app: &tauri::AppHandle) -> Result<bool, String> {
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|error| error.to_string())
+}
+
+fn set_startup_enabled_inner(app: &tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    }
+    .map_err(|error| error.to_string())?;
+
+    let enabled = manager.is_enabled().map_err(|error| error.to_string())?;
+    app.state::<StartupMenuItem>()
+        .0
+        .set_checked(enabled)
+        .map_err(|error| error.to_string())?;
+    app.emit("startup://updated", enabled)
+        .map_err(|error| error.to_string())?;
+    Ok(enabled)
+}
+
+#[tauri::command]
+fn get_startup_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    startup_enabled(&app)
+}
+
+#[tauri::command]
+fn set_startup_enabled(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    set_startup_enabled_inner(&app, enabled)
+}
 
 #[tauri::command]
 async fn get_settings(state: tauri::State<'_, Arc<AppState>>) -> Result<AppSettings, String> {
@@ -177,10 +215,18 @@ pub fn run() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
     let application = tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec!["--background"]),
+        ))
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             open_route(app, "/metrics");
         }))
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            app.handle().set_dock_visibility(false)?;
+
+            let started_in_background = std::env::args().any(|argument| argument == "--background");
             let app_data = app.path().app_data_dir()?;
             std::fs::create_dir_all(&app_data)?;
             let handle = app.handle().clone();
@@ -218,8 +264,20 @@ pub fn run() {
                 tauri::menu::MenuItem::with_id(app, "metrics", "Metrics", true, None::<&str>)?;
             let settings =
                 tauri::menu::MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+            let launch_at_startup = tauri::menu::CheckMenuItem::with_id(
+                app,
+                "launch_at_startup",
+                "Launch at startup",
+                true,
+                startup_enabled(app.handle()).unwrap_or(false),
+                None::<&str>,
+            )?;
             let quit = tauri::menu::MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = tauri::menu::Menu::with_items(app, &[&metrics, &settings, &quit])?;
+            let menu = tauri::menu::Menu::with_items(
+                app,
+                &[&metrics, &settings, &launch_at_startup, &quit],
+            )?;
+            app.manage(StartupMenuItem(launch_at_startup));
             let mut tray = tauri::tray::TrayIconBuilder::with_id("main")
                 .menu(&menu)
                 .show_menu_on_left_click(true);
@@ -229,6 +287,17 @@ pub fn run() {
             tray.on_menu_event(|app, event| match event.id.as_ref() {
                 "metrics" => open_route(app, "/metrics"),
                 "settings" => open_route(app, "/settings"),
+                "launch_at_startup" => {
+                    let desired = startup_enabled(app).map(|enabled| !enabled);
+                    if let Err(error) =
+                        desired.and_then(|enabled| set_startup_enabled_inner(app, enabled))
+                    {
+                        tracing::error!(%error, "failed to update launch-at-startup setting");
+                        if let Ok(enabled) = startup_enabled(app) {
+                            let _ = app.state::<StartupMenuItem>().0.set_checked(enabled);
+                        }
+                    }
+                }
                 "quit" => {
                     let app = app.clone();
                     let state = app.state::<Arc<AppState>>().inner().clone();
@@ -240,6 +309,11 @@ pub fn run() {
                 _ => {}
             })
             .build(app)?;
+            if started_in_background {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.hide()?;
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -254,7 +328,9 @@ pub fn run() {
             get_metric_catalog,
             get_latest_metrics,
             query_metric_history,
-            get_service_status
+            get_service_status,
+            get_startup_enabled,
+            set_startup_enabled
         ])
         .build(tauri::generate_context!())
         .expect("error while building Computer State");

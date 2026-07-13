@@ -100,6 +100,7 @@ select { cursor: pointer; }
 .field-label { display: block; font-size: 12px; font-weight: 600; }
 .setting-row { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--border); }
 .setting-row:last-child { border-bottom: 0; }
+.startup-setting { min-height: 40px; }
 .setting-row strong, .setting-row small { display: block; }
 .setting-row strong { font-size: 12px; font-weight: 600; }
 .setting-row small { margin-top: 2px; color: var(--muted-foreground); font-size: 10px; }

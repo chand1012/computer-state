@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Check, Database, Globe2, RefreshCw, Save, Server } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
+import { Check, Database, Globe2, Power, RefreshCw, Save, Server } from "lucide-react";
 import { api, type AppSettings, type MetricDescriptor, type ServiceStatus } from "../../lib/api";
 import { Button } from "../../components/ui/Button";
 import { Switch } from "../../components/ui/Switch";
@@ -8,10 +9,36 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings>();
   const [catalog, setCatalog] = useState<MetricDescriptor[]>([]);
   const [status, setStatus] = useState<ServiceStatus>();
+  const [startupEnabled, setStartupEnabled] = useState(false);
+  const [changingStartup, setChangingStartup] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string }>();
 
-  useEffect(() => { Promise.all([api.settings(), api.catalog(), api.status()]).then(([settings, catalog, status]) => { setSettings(settings); setCatalog(catalog); setStatus(status); }).catch((error) => setMessage({ type: "error", text: String(error) })); }, []);
+  useEffect(() => {
+    Promise.all([api.settings(), api.catalog(), api.status(), api.startupEnabled()])
+      .then(([settings, catalog, status, startupEnabled]) => { setSettings(settings); setCatalog(catalog); setStatus(status); setStartupEnabled(startupEnabled); })
+      .catch((error) => setMessage({ type: "error", text: String(error) }));
+
+    let disposed = false;
+    let stop: undefined | (() => void);
+    listen<boolean>("startup://updated", ({ payload }) => setStartupEnabled(payload)).then((unlisten) => {
+      if (disposed) unlisten(); else stop = unlisten;
+    });
+    return () => { disposed = true; stop?.(); };
+  }, []);
+
+  async function changeStartup(enabled: boolean) {
+    setChangingStartup(true); setMessage(undefined);
+    try {
+      const actual = await api.setStartupEnabled(enabled);
+      setStartupEnabled(actual);
+      setMessage({ type: "ok", text: actual ? "Computer State will launch at startup" : "Launch at startup disabled" });
+    } catch (error) {
+      setMessage({ type: "error", text: String(error) });
+    } finally {
+      setChangingStartup(false);
+    }
+  }
 
   async function save() {
     if (!settings) return;
@@ -30,6 +57,9 @@ export function SettingsPage() {
       {message && <div className={`notice ${message.type}`}>{message.type === "ok" && <Check size={15}/>} {message.text}</div>}
       <div className="settings-layout">
         <div className="settings-main">
+          <SettingsCard icon={<Power size={18}/>} title="Startup" description="Keep metrics collection and the local HTTP API available after you sign in.">
+            <div className="setting-row startup-setting"><div><strong>Launch at startup</strong><small>Starts in the tray without opening the app window on macOS and Windows.</small></div><Switch label="Launch Computer State at startup" disabled={changingStartup} checked={startupEnabled} onChange={changeStartup}/></div>
+          </SettingsCard>
           <SettingsCard icon={<Database size={18}/>} title="Collection & retention" description="Choose how frequently Computer State records a snapshot and how long it remains local.">
             <div className="field-grid">
               <label className="field"><span>Collection interval</span><small>Seconds between stored snapshots</small><input type="number" min={10} max={86400} value={settings.collection.interval_seconds} onChange={(e) => setCollection("interval_seconds", Number(e.target.value))}/></label>
