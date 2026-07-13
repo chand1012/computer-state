@@ -7,7 +7,14 @@ import { Button } from "../../components/ui/Button";
 import { ChartContainer } from "../../components/ui/Chart";
 
 type ChartConfig = { id: string; metric: string; hours: number };
-const ranges = [{ label: "1 hour", hours: 1 }, { label: "6 hours", hours: 6 }, { label: "24 hours", hours: 24 }, { label: "7 days", hours: 168 }];
+type TimeBounds = { from: number; to: number };
+const ranges = [
+  { label: "15 minutes", hours: 0.25, intervalSeconds: 15 },
+  { label: "1 hour", hours: 1, intervalSeconds: 60 },
+  { label: "6 hours", hours: 6, intervalSeconds: 300 },
+  { label: "24 hours", hours: 24, intervalSeconds: 900 },
+  { label: "7 days", hours: 168, intervalSeconds: 3600 },
+];
 
 export function MetricsPage() {
   const [catalog, setCatalog] = useState<MetricDescriptor[]>([]);
@@ -38,14 +45,16 @@ function MetricChart({ config, catalog, canRemove, onChange, onRemove }: { confi
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<Date>();
+  const [timeBounds, setTimeBounds] = useState<TimeBounds>(() => createTimeBounds(config.hours));
   const descriptor = catalog.find((metric) => metric.id === config.metric);
 
   const load = useCallback(async () => {
     try {
       setError("");
-      const to = new Date(); const from = new Date(to.getTime() - config.hours * 3_600_000);
-      const interval = config.hours <= 1 ? 60 : config.hours <= 24 ? 300 : 3600;
-      setSamples(await api.history([config.metric], from, to, "avg", interval));
+      const bounds = createTimeBounds(config.hours);
+      const range = ranges.find((item) => item.hours === config.hours) ?? ranges[2];
+      setSamples(await api.history([config.metric], new Date(bounds.from), new Date(bounds.to), "avg", range.intervalSeconds));
+      setTimeBounds(bounds);
       setUpdatedAt(new Date());
     } catch (cause) { setError(String(cause)); } finally { setLoading(false); }
   }, [config.metric, config.hours]);
@@ -60,7 +69,8 @@ function MetricChart({ config, catalog, canRemove, onChange, onRemove }: { confi
   }, [load]);
 
   const { data, series } = useMemo(() => buildChartData(samples), [samples]);
-  const latest = samples.length ? samples[samples.length - 1].value : undefined;
+  const chartData = useMemo(() => [{ timestamp: timeBounds.from }, ...data, { timestamp: timeBounds.to }], [data, timeBounds]);
+  const latest = samples.reduce<MetricSample | undefined>((newest, sample) => !newest || sample.timestamp > newest.timestamp ? sample : newest, undefined)?.value;
 
   return (
     <article className="card chart-card">
@@ -79,13 +89,13 @@ function MetricChart({ config, catalog, canRemove, onChange, onRemove }: { confi
       <div className="chart-area">
         {loading ? <div className="chart-state"><div className="spinner" /> Loading history…</div> : error ? <div className="chart-state error"><AlertCircle size={19} />{error}</div> : data.length === 0 ? <div className="chart-state"><Activity size={20} />Waiting for the first stored sample…</div> : (
           <ChartContainer>
-            <AreaChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+            <AreaChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
               <defs>{series.map((key, index) => <linearGradient key={key} id={`fill-${config.id}-${index}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={`var(--chart-${index % 5 + 1})`} stopOpacity={0.28}/><stop offset="95%" stopColor={`var(--chart-${index % 5 + 1})`} stopOpacity={0}/></linearGradient>)}</defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
-              <XAxis dataKey="timestamp" tickFormatter={(value) => new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={28} />
+              <XAxis dataKey="timestamp" type="number" scale="linear" domain={[timeBounds.from, timeBounds.to]} allowDataOverflow tickCount={6} tickFormatter={(value) => formatAxisTime(Number(value), config.hours)} tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={28} />
               <YAxis tickFormatter={(value) => descriptor ? formatMetric(value, descriptor.unit).replace(/\s/g, " ") : value} width={62} tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 10, color: "var(--popover-foreground)" }} labelFormatter={(value) => new Date(value).toLocaleString()} formatter={(value) => descriptor ? formatMetric(Number(value), descriptor.unit) : value} />
-              {series.map((key, index) => <Area key={key} type="monotone" dataKey={key} stroke={`var(--chart-${index % 5 + 1})`} strokeWidth={2} fill={`url(#fill-${config.id}-${index})`} connectNulls isAnimationActive={false} />)}
+              {series.map((key, index) => <Area key={key} type="monotone" dataKey={key} stroke={`var(--chart-${index % 5 + 1})`} strokeWidth={2} fill={`url(#fill-${config.id}-${index})`} dot={data.length <= 1 ? { r: 3, fill: `var(--chart-${index % 5 + 1})`, stroke: "var(--card)", strokeWidth: 2 } : false} connectNulls isAnimationActive={false} />)}
             </AreaChart>
           </ChartContainer>
         )}
@@ -102,4 +112,14 @@ export function buildChartData(samples: MetricSample[]) {
     byTime.set(sample.timestamp, { ...(byTime.get(sample.timestamp) ?? {}), [key]: sample.value });
   }
   return { series, data: Array.from(byTime, ([timestamp, values]) => ({ timestamp, ...values })).sort((a, b) => a.timestamp - b.timestamp) };
+}
+
+export function createTimeBounds(hours: number, now = Date.now()): TimeBounds {
+  return { from: now - hours * 3_600_000, to: now };
+}
+
+function formatAxisTime(timestamp: number, hours: number) {
+  const date = new Date(timestamp);
+  if (hours > 24) return date.toLocaleDateString([], { month: "short", day: "numeric" });
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }

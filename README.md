@@ -190,9 +190,9 @@ The application window contains two views, available from a tab menu at the top 
 
 ### Dashboard
 
-The dashboard displays real-time graphs based on current and locally stored historical system metrics. Users can select a metric from a simple dropdown menu and switch the graph between CPU, memory, network, storage, and other available system data.
+The dashboard displays real-time graphs based on current and locally stored historical system metrics. Users can select a metric from a simple dropdown menu and switch the graph between CPU, memory, network, storage, and other available system data. Time ranges begin at 15 minutes.
 
-The dashboard can display multiple graphs at the same time. Users may add as many metric graphs as they need, allowing them to monitor several aspects of the computer from a single view. Graphs continue to update as new samples are collected.
+The dashboard can display multiple graphs at the same time. Users may add as many metric graphs as they need, allowing them to monitor several aspects of the computer from a single view. Graphs use a Grafana-style time axis: older samples move left while the newest data remains at the right edge and updates as new samples are collected.
 
 Charts are built with the shadcn/ui chart components and automatically follow the operating system's light or dark theme.
 

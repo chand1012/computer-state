@@ -211,6 +211,8 @@ There is no architectural limit on the number of charts, but the UI should virtu
 
 Charts refresh when a new scheduled sample is committed. Rust emits a `metrics://sample-created` Tauri event after a successful collection transaction. The frontend invalidates relevant queries and redraws charts. A slow or hidden frontend must not block collection.
 
+The shortest selectable chart window is 15 minutes. Charts use a fixed time-domain window with older samples on the left and the newest data anchored at the right edge. Each committed sample advances the window so existing points move left in the same manner as a Grafana time-series panel.
+
 Charts use shadcn theme tokens. Metric colors must maintain sufficient contrast in both themes and must not be hard-coded solely for a light background.
 
 ### Settings view

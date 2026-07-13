@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { Activity, Settings } from "lucide-react";
 import { NavLink, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
+import pulseCoreLogo from "./assets/pulse-core-logo-128.png";
 import "./App.css";
 
 const MetricsPage = lazy(() => import("./features/metrics/MetricsPage").then((module) => ({ default: module.MetricsPage })));
@@ -25,7 +26,7 @@ export default function App() {
     <div className="app-shell">
       <header className="app-header">
         <div className="brand">
-          <div className="brand-mark"><Activity size={19} strokeWidth={2.5} /></div>
+          <div className="brand-mark"><img src={pulseCoreLogo} alt="" /></div>
           <div>
             <strong>Computer State</strong>
             <span>Local system telemetry</span>
