@@ -1,6 +1,6 @@
 [package]
 name = "computer-state"
-version = "0.1.1"
+version = "0.1.2"
 description = "Local-first system metrics tray application"
 authors = ["Chandler"]
 edition = "2021"
