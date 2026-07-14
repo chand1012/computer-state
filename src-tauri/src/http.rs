@@ -51,6 +51,26 @@ impl Fairing for RequestTracing {
         let request_id = &request.local_cache(|| RequestId("unknown".into())).0;
         response.set_raw_header("X-Request-ID", request_id);
         tracing::debug!(request_id, method = %request.method(), uri = %request.uri(), status = response.status().code, "HTTP request completed");
+        if let Some(state) = request.rocket().state::<Arc<AppState>>() {
+            state
+                .record_http_log(
+                    if response.status().code >= 500 {
+                        "ERROR"
+                    } else {
+                        "INFO"
+                    },
+                    format!(
+                        "{} {} {} · request {request_id} · client {}",
+                        request.method(),
+                        request.uri(),
+                        response.status().code,
+                        request
+                            .client_ip()
+                            .map_or_else(|| "unknown".into(), |ip| ip.to_string())
+                    ),
+                )
+                .await;
+        }
     }
 }
 
@@ -359,6 +379,7 @@ fn api_error(status: Status, message: impl Into<String>) -> Custom<Json<Value>> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{database::MetricRepository, settings::SettingsService};
 
     #[test]
     fn parses_durations() {
@@ -370,5 +391,30 @@ mod tests {
     fn recognizes_tailscale_addresses() {
         assert!(is_tailscale("100.100.1.2".parse().unwrap()));
         assert!(!is_tailscale("192.168.1.2".parse().unwrap()));
+    }
+
+    #[rocket::async_test]
+    async fn captures_requests_in_the_shared_server_log() {
+        let directory = tempfile::tempdir().unwrap();
+        let settings = Arc::new(
+            SettingsService::load(directory.path().join("settings.json"))
+                .await
+                .unwrap(),
+        );
+        let repository = Arc::new(
+            MetricRepository::open(&directory.path().join("metrics.sqlite3"))
+                .await
+                .unwrap(),
+        );
+        let state = Arc::new(AppState::new(settings, repository, Vec::new()));
+        let client = rocket::local::asynchronous::Client::tracked(build(state.clone(), 8888))
+            .await
+            .unwrap();
+
+        client.get("/latest").dispatch().await;
+
+        let logs = state.http_logs().await;
+        assert_eq!(logs.len(), 1);
+        assert!(logs[0].message.contains("GET /latest"));
     }
 }

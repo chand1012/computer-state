@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Check, Database, Globe2, Power, RefreshCw, Save, Server } from "lucide-react";
-import { api, type AppSettings, type MetricDescriptor, type ServiceStatus } from "../../lib/api";
+import { Check, Database, FileText, Globe2, Power, RefreshCw, Save, Server } from "lucide-react";
+import { api, type AppSettings, type HttpLogEntry, type MetricDescriptor, type ServiceStatus } from "../../lib/api";
 import { Button } from "../../components/ui/Button";
 import { Switch } from "../../components/ui/Switch";
 
@@ -9,14 +9,16 @@ export function SettingsPage() {
   const [settings, setSettings] = useState<AppSettings>();
   const [catalog, setCatalog] = useState<MetricDescriptor[]>([]);
   const [status, setStatus] = useState<ServiceStatus>();
+  const [httpLogs, setHttpLogs] = useState<HttpLogEntry[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
   const [startupEnabled, setStartupEnabled] = useState(false);
   const [changingStartup, setChangingStartup] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string }>();
 
   useEffect(() => {
-    Promise.all([api.settings(), api.catalog(), api.status(), api.startupEnabled()])
-      .then(([settings, catalog, status, startupEnabled]) => { setSettings(settings); setCatalog(catalog); setStatus(status); setStartupEnabled(startupEnabled); })
+    Promise.all([api.settings(), api.catalog(), api.status(), api.startupEnabled(), api.httpLogs()])
+      .then(([settings, catalog, status, startupEnabled, logs]) => { setSettings(settings); setCatalog(catalog); setStatus(status); setStartupEnabled(startupEnabled); setHttpLogs(logs); })
       .catch((error) => setMessage({ type: "error", text: String(error) }));
 
     let disposed = false;
@@ -24,8 +26,18 @@ export function SettingsPage() {
     listen<boolean>("startup://updated", ({ payload }) => setStartupEnabled(payload)).then((unlisten) => {
       if (disposed) unlisten(); else stop = unlisten;
     });
-    return () => { disposed = true; stop?.(); };
+    const logRefresh = window.setInterval(() => {
+      api.httpLogs().then((logs) => { if (!disposed) setHttpLogs(logs); }).catch(() => undefined);
+    }, 2_000);
+    return () => { disposed = true; stop?.(); window.clearInterval(logRefresh); };
   }, []);
+
+  async function refreshLogs() {
+    setLoadingLogs(true);
+    try { setHttpLogs(await api.httpLogs()); }
+    catch (error) { setMessage({ type: "error", text: String(error) }); }
+    finally { setLoadingLogs(false); }
+  }
 
   async function changeStartup(enabled: boolean) {
     setChangingStartup(true); setMessage(undefined);
@@ -72,6 +84,12 @@ export function SettingsPage() {
             <div className="subsection"><span className="field-label">Allowed networks</span><small>Requests from other networks are rejected.</small>
               {[{ id: "loopback", label: "Localhost", detail: "127.0.0.1 and ::1" }, { id: "tailscale", label: "Tailscale", detail: "Your private tailnet" }].map((network) => <div className="setting-row" key={network.id}><div><strong>{network.label}</strong><small>{network.detail}</small></div><Switch label={`Allow ${network.label}`} checked={settings.http.allowed_interfaces.includes(network.id)} onChange={(checked) => setSettings({ ...settings, http: { ...settings.http, allowed_interfaces: checked ? [...settings.http.allowed_interfaces, network.id] : settings.http.allowed_interfaces.filter((item) => item !== network.id) } })}/></div>)}
               <label className="field custom-addresses"><span>Additional client addresses</span><small>Optional comma-separated IPv4 or IPv6 addresses</small><input type="text" placeholder="192.168.1.25, 10.0.0.4" value={settings.http.allowed_interfaces.filter((item) => item !== "loopback" && item !== "tailscale").join(", ")} onChange={(event) => { const standard = settings.http.allowed_interfaces.filter((item) => item === "loopback" || item === "tailscale"); const custom = event.target.value.split(",").map((item) => item.trim()).filter(Boolean); setSettings({ ...settings, http: { ...settings.http, allowed_interfaces: [...standard, ...custom] } }); }}/></label>
+            </div>
+          </SettingsCard>
+          <SettingsCard icon={<FileText size={18}/>} title="Rocket server logs" description="Recent lifecycle and request activity from the embedded HTTP server.">
+            <div className="log-toolbar"><span>{httpLogs.length} recent {httpLogs.length === 1 ? "entry" : "entries"}</span><Button variant="outline" onClick={refreshLogs} disabled={loadingLogs}><RefreshCw className={loadingLogs ? "spin" : undefined} size={14}/> Refresh</Button></div>
+            <div className="server-logs" role="log" aria-label="Rocket server logs">
+              {httpLogs.length === 0 ? <div className="empty-logs">No Rocket server activity yet.</div> : [...httpLogs].reverse().map((entry, index) => <div className="log-entry" key={`${entry.timestamp}-${index}`}><time dateTime={entry.timestamp}>{new Date(entry.timestamp).toLocaleString()}</time><strong className={entry.level === "ERROR" ? "log-error" : undefined}>{entry.level}</strong><code>{entry.message}</code></div>)}
             </div>
           </SettingsCard>
           <SettingsCard icon={<Globe2 size={18}/>} title="Exported metrics" description="Disabled metrics are no longer collected or exported. Existing history remains until it expires.">

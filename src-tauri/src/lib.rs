@@ -201,6 +201,13 @@ async fn get_service_status(
     })
 }
 
+#[tauri::command]
+async fn get_http_logs(
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<Vec<state::HttpLogEntry>, String> {
+    Ok(state.http_logs().await)
+}
+
 fn open_route(app: &tauri::AppHandle, route: &str) {
     if let Some(window) = app.get_webview_window("main") {
         #[cfg(target_os = "macos")]
@@ -333,6 +340,7 @@ pub fn run() {
             get_latest_metrics,
             query_metric_history,
             get_service_status,
+            get_http_logs,
             get_startup_enabled,
             set_startup_enabled
         ])

@@ -2,14 +2,29 @@ use crate::{
     collector::SystemCollector, database::MetricRepository, model::MetricSample,
     settings::SettingsService,
 };
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use serde::Serialize;
+use std::{
+    collections::{HashSet, VecDeque},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::{Mutex, Notify, RwLock};
+
+const HTTP_LOG_LIMIT: usize = 500;
+
+#[derive(Clone, Serialize)]
+pub struct HttpLogEntry {
+    pub timestamp: String,
+    pub level: &'static str,
+    pub message: String,
+}
 
 pub struct AppState {
     pub settings: Arc<SettingsService>,
     pub repository: Arc<MetricRepository>,
     pub latest: RwLock<Vec<MetricSample>>,
     pub scheduler_changed: Notify,
+    http_logs: RwLock<VecDeque<HttpLogEntry>>,
     collector: SystemCollector,
     server: Mutex<Option<ServerRuntime>>,
 }
@@ -56,14 +71,33 @@ impl AppState {
             repository,
             latest: RwLock::new(latest),
             scheduler_changed: Notify::new(),
+            http_logs: RwLock::new(VecDeque::new()),
             collector: SystemCollector::new(),
             server: Mutex::new(None),
         }
     }
 
+    pub async fn record_http_log(&self, level: &'static str, message: impl Into<String>) {
+        let mut logs = self.http_logs.write().await;
+        if logs.len() == HTTP_LOG_LIMIT {
+            logs.pop_front();
+        }
+        logs.push_back(HttpLogEntry {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            level,
+            message: message.into(),
+        });
+    }
+
+    pub async fn http_logs(&self) -> Vec<HttpLogEntry> {
+        self.http_logs.read().await.iter().cloned().collect()
+    }
+
     pub async fn restart_http(self: &Arc<Self>) -> Result<(), String> {
         let mut server = self.server.lock().await;
         if let Some(previous) = server.take() {
+            self.record_http_log("INFO", "Restarting Rocket server")
+                .await;
             previous.shutdown.notify();
             let _ = tokio::time::timeout(Duration::from_secs(2), previous.task).await;
         }
@@ -74,9 +108,15 @@ impl AppState {
             .await
             .map_err(|error| format!("failed to initialize HTTP server: {error}"))?;
         let shutdown = rocket.shutdown();
+        self.record_http_log("INFO", format!("Rocket server listening on 0.0.0.0:{port}"))
+            .await;
+        let log_state = self.clone();
         let task = tauri::async_runtime::spawn(async move {
             if let Err(error) = rocket.launch().await {
                 tracing::error!(%error, port, "HTTP server stopped");
+                log_state
+                    .record_http_log("ERROR", format!("Rocket server stopped: {error}"))
+                    .await;
             }
         });
         *server = Some(ServerRuntime { shutdown, task });
@@ -85,6 +125,7 @@ impl AppState {
 
     pub async fn shutdown_http(&self) {
         if let Some(server) = self.server.lock().await.take() {
+            self.record_http_log("INFO", "Stopping Rocket server").await;
             server.shutdown.notify();
             let _ = tokio::time::timeout(Duration::from_secs(2), server.task).await;
         }

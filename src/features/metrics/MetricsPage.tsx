@@ -6,8 +6,9 @@ import { api, formatMetric, type MetricDescriptor, type MetricSample } from "../
 import { Button } from "../../components/ui/Button";
 import { ChartContainer } from "../../components/ui/Chart";
 
-type ChartConfig = { id: string; metric: string; hours: number };
+export type ChartConfig = { id: string; metric: string; hours: number };
 type TimeBounds = { from: number; to: number };
+const CHART_STORAGE_KEY = "computer-state.metrics.charts.v1";
 const ranges = [
   { label: "15 minutes", hours: 0.25, intervalSeconds: 15 },
   { label: "1 hour", hours: 1, intervalSeconds: 60 },
@@ -18,9 +19,12 @@ const ranges = [
 
 export function MetricsPage() {
   const [catalog, setCatalog] = useState<MetricDescriptor[]>([]);
-  const [charts, setCharts] = useState<ChartConfig[]>([{ id: crypto.randomUUID(), metric: "cpu.total.usage", hours: 6 }]);
+  const [charts, setCharts] = useState<ChartConfig[]>(readStoredCharts);
 
   useEffect(() => { api.catalog().then(setCatalog); }, []);
+  useEffect(() => {
+    try { localStorage.setItem(CHART_STORAGE_KEY, JSON.stringify(charts)); } catch { /* Persistence may be unavailable in restricted webviews. */ }
+  }, [charts]);
   const available = catalog.filter((metric) => metric.available);
 
   return (
@@ -38,6 +42,31 @@ export function MetricsPage() {
       </div>
     </section>
   );
+}
+
+function defaultCharts(): ChartConfig[] {
+  return [{ id: crypto.randomUUID(), metric: "cpu.total.usage", hours: 6 }];
+}
+
+function readStoredCharts(): ChartConfig[] {
+  try { return parseStoredCharts(localStorage.getItem(CHART_STORAGE_KEY)) ?? defaultCharts(); }
+  catch { return defaultCharts(); }
+}
+
+export function parseStoredCharts(value: string | null): ChartConfig[] | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.length === 0) return undefined;
+    const charts = parsed.filter((item): item is ChartConfig => {
+      if (!item || typeof item !== "object") return false;
+      const chart = item as Partial<ChartConfig>;
+      return typeof chart.id === "string" && chart.id.length > 0
+        && typeof chart.metric === "string" && chart.metric.length > 0
+        && ranges.some((range) => range.hours === chart.hours);
+    });
+    return charts.length === parsed.length ? charts : undefined;
+  } catch { return undefined; }
 }
 
 function MetricChart({ config, catalog, canRemove, onChange, onRemove }: { config: ChartConfig; catalog: MetricDescriptor[]; canRemove: boolean; onChange: (value: ChartConfig) => void; onRemove: () => void }) {

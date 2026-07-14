@@ -29,6 +29,12 @@ export type ServiceStatus = {
   latest_collection?: string;
 };
 
+export type HttpLogEntry = {
+  timestamp: string;
+  level: "INFO" | "ERROR";
+  message: string;
+};
+
 export const api = {
   settings: () => invoke<AppSettings>("get_settings"),
   updateSettings: (settings: AppSettings) => invoke<AppSettings>("update_settings", { settings }),
@@ -37,6 +43,7 @@ export const api = {
   catalog: () => invoke<MetricDescriptor[]>("get_metric_catalog"),
   latest: () => invoke<MetricSample[]>("get_latest_metrics"),
   status: () => invoke<ServiceStatus>("get_service_status"),
+  httpLogs: () => invoke<HttpLogEntry[]>("get_http_logs"),
   history: (metrics: string[], from: Date, to: Date, aggregation?: string, intervalSeconds?: number) =>
     invoke<MetricSample[]>("query_metric_history", {
       query: { metrics, from: from.toISOString(), to: to.toISOString(), aggregation, intervalSeconds },

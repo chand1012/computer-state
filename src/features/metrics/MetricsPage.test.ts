@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildChartData, createTimeBounds } from "./MetricsPage";
+import { buildChartData, createTimeBounds, parseStoredCharts } from "./MetricsPage";
 
 describe("buildChartData", () => {
   it("groups labeled series at each timestamp", () => {
@@ -19,4 +19,16 @@ describe("buildChartData", () => {
     expect(createTimeBounds(0.25, 1_000_000)).toEqual({ from: 100_000, to: 1_000_000 });
   });
 
+});
+
+describe("parseStoredCharts", () => {
+  it("restores valid chart selections", () => {
+    const charts = [{ id: "chart-1", metric: "memory.used", hours: 24 }];
+    expect(parseStoredCharts(JSON.stringify(charts))).toEqual(charts);
+  });
+
+  it("rejects malformed or unsupported chart selections", () => {
+    expect(parseStoredCharts("not json")).toBeUndefined();
+    expect(parseStoredCharts(JSON.stringify([{ id: "chart-1", metric: "memory.used", hours: 2 }]))).toBeUndefined();
+  });
 });
