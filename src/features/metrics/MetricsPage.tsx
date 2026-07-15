@@ -97,7 +97,11 @@ function MetricChart({ config, catalog, canRemove, onChange, onRemove }: { confi
     return () => { disposed = true; stop?.(); document.removeEventListener("visibilitychange", visible); };
   }, [load]);
 
-  const { data, series } = useMemo(() => buildChartData(samples), [samples]);
+  const range = ranges.find((item) => item.hours === config.hours) ?? ranges[2];
+  const { data, series } = useMemo(
+    () => buildChartData(samples, range.intervalSeconds * 1000),
+    [samples, range.intervalSeconds],
+  );
   const chartData = useMemo(() => [{ timestamp: timeBounds.from }, ...data, { timestamp: timeBounds.to }], [data, timeBounds]);
   const latest = samples.reduce<MetricSample | undefined>((newest, sample) => !newest || sample.timestamp > newest.timestamp ? sample : newest, undefined)?.value;
 
@@ -124,7 +128,7 @@ function MetricChart({ config, catalog, canRemove, onChange, onRemove }: { confi
               <XAxis dataKey="timestamp" type="number" scale="linear" domain={[timeBounds.from, timeBounds.to]} allowDataOverflow tickCount={6} tickFormatter={(value) => formatAxisTime(Number(value), config.hours)} tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} axisLine={false} tickLine={false} minTickGap={28} />
               <YAxis tickFormatter={(value) => descriptor ? formatMetric(value, descriptor.unit).replace(/\s/g, " ") : value} width={62} tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 10, color: "var(--popover-foreground)" }} labelFormatter={(value) => new Date(value).toLocaleString()} formatter={(value) => descriptor ? formatMetric(Number(value), descriptor.unit) : value} />
-              {series.map((key, index) => <Area key={key} type="monotone" dataKey={key} stroke={`var(--chart-${index % 5 + 1})`} strokeWidth={2} fill={`url(#fill-${config.id}-${index})`} dot={data.length <= 1 ? { r: 3, fill: `var(--chart-${index % 5 + 1})`, stroke: "var(--card)", strokeWidth: 2 } : false} connectNulls isAnimationActive={false} />)}
+              {series.map((key, index) => <Area key={key} type="monotone" dataKey={key} stroke={`var(--chart-${index % 5 + 1})`} strokeWidth={2} fill={`url(#fill-${config.id}-${index})`} dot={data.length <= 1 ? { r: 3, fill: `var(--chart-${index % 5 + 1})`, stroke: "var(--card)", strokeWidth: 2 } : false} isAnimationActive={false} />)}
             </AreaChart>
           </ChartContainer>
         )}
@@ -133,14 +137,32 @@ function MetricChart({ config, catalog, canRemove, onChange, onRemove }: { confi
   );
 }
 
-export function buildChartData(samples: MetricSample[]) {
+export function buildChartData(samples: MetricSample[], expectedIntervalMs?: number) {
   const series = Array.from(new Set(samples.map((sample) => Object.values(sample.labels).join(" · ") || "value")));
   const byTime = new Map<number, Record<string, number>>();
   for (const sample of samples) {
     const key = Object.values(sample.labels).join(" · ") || "value";
     byTime.set(sample.timestamp, { ...(byTime.get(sample.timestamp) ?? {}), [key]: sample.value });
   }
-  return { series, data: Array.from(byTime, ([timestamp, values]) => ({ timestamp, ...values })).sort((a, b) => a.timestamp - b.timestamp) };
+  const points: Array<{ timestamp: number } & Record<string, number | null>> = Array.from(
+    byTime,
+    ([timestamp, values]) => ({ timestamp, ...values }),
+  ).sort((a, b) => a.timestamp - b.timestamp);
+
+  if (!expectedIntervalMs || expectedIntervalMs <= 0) return { series, data: points };
+
+  const data: typeof points = [];
+  for (const point of points) {
+    const previous = data[data.length - 1];
+    if (previous && point.timestamp - previous.timestamp > expectedIntervalMs * 1.5) {
+      data.push({
+        timestamp: previous.timestamp + expectedIntervalMs,
+        ...Object.fromEntries(series.map((key) => [key, null])),
+      });
+    }
+    data.push(point);
+  }
+  return { series, data };
 }
 
 export function createTimeBounds(hours: number, now = Date.now()): TimeBounds {

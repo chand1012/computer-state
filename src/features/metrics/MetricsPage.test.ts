@@ -15,6 +15,30 @@ describe("buildChartData", () => {
     ]);
   });
 
+  it("inserts an empty point instead of connecting across a collection gap", () => {
+    const result = buildChartData([
+      { metric: "cpu.total.usage", timestamp: 0, value: 20, labels: {} },
+      { metric: "cpu.total.usage", timestamp: 60_000, value: 25, labels: {} },
+      { metric: "cpu.total.usage", timestamp: 3_660_000, value: 10, labels: {} },
+    ], 60_000);
+
+    expect(result.data).toEqual([
+      { timestamp: 0, value: 20 },
+      { timestamp: 60_000, value: 25 },
+      { timestamp: 120_000, value: null },
+      { timestamp: 3_660_000, value: 10 },
+    ]);
+  });
+
+  it("does not add gaps between adjacent aggregation buckets", () => {
+    const result = buildChartData([
+      { metric: "cpu.total.usage", timestamp: 0, value: 20, labels: {} },
+      { metric: "cpu.total.usage", timestamp: 60_000, value: 25, labels: {} },
+    ], 60_000);
+
+    expect(result.data).toHaveLength(2);
+  });
+
   it("anchors a fifteen-minute window at the current time", () => {
     expect(createTimeBounds(0.25, 1_000_000)).toEqual({ from: 100_000, to: 1_000_000 });
   });
