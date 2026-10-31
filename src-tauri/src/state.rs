@@ -37,7 +37,7 @@ struct ServerRuntime {
 impl AppState {
     pub async fn metric_descriptors(&self) -> Result<Vec<crate::model::MetricDescriptor>, String> {
         Ok(crate::model::descriptors(
-            self.collector.gpu_available().await?,
+            &self.collector.gpu_capabilities().await?,
         ))
     }
     pub async fn collect(&self, persist: bool) -> Result<Vec<MetricSample>, String> {

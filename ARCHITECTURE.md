@@ -365,6 +365,8 @@ Collector
 
 Collectors should be grouped by subsystem rather than creating one operating-system call per metric. For example, one CPU refresh can generate total and per-core samples.
 
+GPU capability reporting is per metric. A backend may expose utilization while leaving one or both memory metrics unavailable; missing fields must not make unrelated GPU metrics unavailable or produce synthetic zero-valued samples.
+
 Implementation layers:
 
 - Portable collector for CPU, memory, processes, storage, network, and uptime where supported
@@ -372,7 +374,12 @@ Implementation layers:
 - Windows-specific adapters where portable APIs are insufficient
 - Linux-specific adapters where portable APIs are insufficient
 - An NVIDIA NVML adapter on Windows and Linux, selected at runtime when a compatible driver and GPU are present
-- Explicit unavailable status for macOS and non-NVIDIA GPUs until another supported backend is added
+- An Apple Silicon adapter that reads the Metal recommended working-set budget and best-effort system-wide utilization and allocated-memory values from the IOKit `IOAccelerator` `PerformanceStatistics` registry property without elevated privileges
+- Explicit unavailable status for Intel macOS and unsupported GPU vendors or drivers
+
+On Apple Silicon, `gpu.memory.total` represents Metal's recommended working-set budget rather than dedicated physical VRAM. Apple Silicon samples use `memory_type="unified"`, and the total-memory sample also uses `capacity_basis="recommended_working_set"`. IOKit performance-statistic keys are driver properties rather than a stable telemetry contract; if a property is absent or changes type, only the affected metric is unavailable. The collector must not invoke `ioreg`, `powermetrics`, or other subprocesses, and must not require administrator privileges.
+
+Broader vendor coverage should use native platform adapters behind the same contract: DXGI and GPU Engine performance counters on Windows, and DRM interfaces on Linux. A nominally cross-platform dependency must not replace a better-supported backend if it reduces correctness, hardware coverage, or multi-GPU support.
 
 Unsupported metrics remain visible to the settings and UI as unavailable with an explanation. They are omitted from `/latest` and `/metrics` until data becomes available.
 
@@ -695,7 +702,7 @@ This is directional rather than a demand for empty modules. Create boundaries as
 - Raw queries return at most 50,000 samples in total across no more than 16 requested metrics. Additional pagination can be introduced without removing this safety bound.
 - Raw and aggregate queries both return label-aware `MetricSample` objects in a `samples` array.
 - Dashboard chart layout is session-local and is not persisted across restarts.
-- NVIDIA GPU utilization and total/used VRAM are collected through NVML on Windows and Linux. GPU metrics remain in the catalog but report unavailable on macOS, non-NVIDIA hardware, or hosts without a compatible NVIDIA driver.
+- NVIDIA GPU utilization and total/used VRAM are collected through NVML on Windows and Linux. Apple Silicon uses Metal for its recommended working-set budget and best-effort IOKit performance statistics for utilization and used memory. Cross-platform GPU telemetry remains incomplete on Intel macOS, non-NVIDIA Windows and Linux hardware, and hosts whose drivers do not expose a supported backend.
 - Launch-at-login is not enabled by the initial implementation.
 - File logging is disabled by default; normal operation writes no per-sample log file.
 

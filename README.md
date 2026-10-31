@@ -39,7 +39,7 @@ Computer State can export the following system metrics:
 - Storage utilization
 - System uptime
 
-Metric availability may vary by operating system and hardware. NVIDIA GPU utilization and memory telemetry are supported on Windows and Linux through NVML when a compatible driver is installed. Other GPU vendors and macOS report GPU metrics as unavailable until a supported telemetry backend is present.
+Cross-platform GPU telemetry is an incomplete goal. NVIDIA GPUs are supported on Windows and Linux through NVML, and Apple Silicon has best-effort support through Metal and IOKit; Intel Macs and other GPU vendors remain unavailable pending additional backends.
 
 ## API access and security
 

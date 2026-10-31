@@ -36,3 +36,7 @@ tempfile = "3"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 nvml-wrapper = "0.11"
+
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+iokit = "0.5.3"
+metal = "0.33"
